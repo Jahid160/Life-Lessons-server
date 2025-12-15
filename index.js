@@ -58,6 +58,17 @@ async function run() {
       }
     });
 
+    app.get("/users/:email/role", async (req, res) => {
+try {
+        const email = req.params.email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      res.send({ role: user?.role || "user" });
+} catch (error) {
+  console.log(error);
+}
+    });
+
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.createdAt = new Date();
