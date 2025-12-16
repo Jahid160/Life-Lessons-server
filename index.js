@@ -58,6 +58,17 @@ async function run() {
       }
     });
 
+app.get("/user/:email", async (req, res) => {
+try {
+      const email = req.params.email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      res.send(user);
+} catch (error) {
+  console.log(error);
+}
+    });
+
 app.get("/users/:email/role", async (req, res) => {
 try {
         const email = req.params.email;
@@ -83,6 +94,23 @@ try {
       res.send(result);
     });
 
+
+// profile page related api
+app.get('/profile/user/:email', async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    const lessons = await lessonsCollection
+      .find({ email: email })
+      .toArray();
+
+    res.send(lessons);
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({ error: "Server error" });
+  }
+});
+
     // lessons related apis
     app.get("/lessons", async (req, res) => {
       try {
@@ -103,23 +131,6 @@ try {
         res.status(500).send({ error: error.message });
       }
     });
-
-app.get('/lessons/user/:email', async (req, res) => {
-  try {
-    const email = req.params.email;
-
-    const lessons = await lessonsCollection
-      .find({ email: email })
-      .toArray();
-
-    res.send(lessons);
-  } catch (error) {
-    console.log(error);
-    res.status(500).send({ error: "Server error" });
-  }
-});
-
-
     // lessons related apis
     app.get("/lessons/:id", async (req, res) => {
       try {
