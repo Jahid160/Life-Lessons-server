@@ -5,29 +5,38 @@ const app = express();
 const port = process.env.PORT || 3000;
 require("dotenv").config();
 
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./digital-life-lessons-firebase-admin-key.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// const verifyFBToken = async (req, res, next) => {
-//     const token = req.headers.authorization;
+const verifyFBToken = async (req, res, next) => {
+    const token = req.headers.authorization;
 
-//     if (!token) {
-//         return res.status(401).send({ message: 'unauthorized access' })
-//     }
+    if (!token) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
 
-//     try {
-//         const idToken = token.split(' ')[1];
-//         const decoded = await admin.auth().verifyIdToken(idToken);
-//         console.log('decoded in the token', decoded);
-//         req.decoded_email = decoded.email;
-//         next();
-//     }
-//     catch (err) {
-//         return res.status(401).send({ message: 'unauthorized access' })
-//     }
+    try {
+        const idToken = token.split(' ')[1];
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        console.log('decoded in the token', decoded);
+        req.decoded_email = decoded.email;
+        next();
+    }
+    catch (err) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
 
-// }
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@bdpro.cwpjxwk.mongodb.net/?appName=BDPro`;
 
@@ -46,17 +55,66 @@ async function run() {
     const db = client.db("life-lessons");
     const lessonsCollection = db.collection("lessons");
     const userCollection = db.collection("users");
+    const lessonReportsCollection = db.collection("lessonReports");
 
-    // user related apis
-    app.get("/users", async (req, res) => {
-      try {
-        const query = req.query;
-        const users = await userCollection.find({}).toArray();
-        res.send(users);
-      } catch (error) {
-        res.status(500).send({ error: error.message });
+
+    const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded_email;
+            const query = { email };
+            const user = await userCollection.findOne(query);
+
+            if (!user || user.role !== 'admin') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+
+            next();
+        }
+
+
+     // users related apis
+        app.get('/users', verifyFBToken, async (req, res) => {
+            const searchText = req.query.searchText;
+            const query = {};
+
+            if (searchText) {
+                // query.displayName = {$regex: searchText, $options: 'i'}
+
+                query.$or = [
+                    { displayName: { $regex: searchText, $options: 'i' } },
+                    { email: { $regex: searchText, $options: 'i' } },
+                ]
+
+            }
+
+            const cursor = userCollection.find(query).sort({ createdAt: -1 }).limit(5);
+            const result = await cursor.toArray();
+            res.send(result);
+        });
+
+
+    // app.get("/users", async (req, res) => {
+    //   try {
+    //     const query = req.query;
+        
+    //     const users = await userCollection.find({}).toArray();
+    //     res.send(users);
+    //   } catch (error) {
+    //     res.status(500).send({ error: error.message });
+    //   }
+    // });
+
+    app.patch('/users/:id/role',verifyFBToken,verifyAdmin, async(req,res)=>{
+    const id = req.params.id;
+    const roleInfo = req.body;
+    const query ={_id: new ObjectId(id)}
+    const updatedDoc = {
+      $set: {
+        role: roleInfo.role
       }
-    });
+    }
+    const result = await userCollection.updateOne(query,updatedDoc)
+    res.send(result)
+    })
 
 app.get("/user/:email", async (req, res) => {
 try {
@@ -83,10 +141,12 @@ try {
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.createdAt = new Date();
+      user.role = 'user';
       const email = user.email;
       const userExists = await userCollection.findOne({ email });
 
       if (userExists) {
+
         return res.send({ message: "user exists" });
       }
 
@@ -111,12 +171,121 @@ app.get('/profile/user/:email', async (req, res) => {
   }
 });
 
+
+// POST: Create lesson report user
+
+    app.post("/lessonReports", async (req, res) => {
+      try {
+        const {
+          lessonId,
+          reportedLessonTitle,
+          reporterUserId,
+          reportedUserEmail,
+          reason,
+          createdAt,
+        } = req.body;
+
+        if (!lessonId || !reporterUserId || !reason) {
+          return res.status(400).send({
+            message: "Missing required fields",
+          });
+        }
+
+        // stop existingReport same user
+        const existingReport = await lessonReportsCollection.findOne({
+          lessonId,
+          reporterUserId,
+        });
+
+        if (existingReport) {
+          return res.status(409).send({
+            message: "You have already reported this lesson",
+          });
+        }
+
+        const reportDoc = {
+          lessonId,
+          reportedLessonTitle,
+          reporterUserId,
+          reportedUserEmail,
+          reason,
+          status: "pending", // pending | reviewed | resolved
+          createdAt: createdAt || new Date().toISOString(),
+        };
+
+        const result = await lessonReportsCollection.insertOne(reportDoc);
+
+        res.send({
+          success: true,
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // GET: All reports (Admin)
+
+    app.get("/lessonReports",verifyFBToken,verifyAdmin, async (req, res) => {
+      const reports = await lessonReportsCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(reports);
+    });
+
+    
+    // PATCH: Update report status (Admin)
+
+    app.patch("/lessonReports/:id",verifyFBToken,verifyAdmin, async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      const result = await lessonReportsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: { status },
+        }
+      );
+
+      res.send(result);
+    });
+
+    // DELETE: Remove report (Admin)
+
+    app.delete("/lessonReports/:id",verifyFBToken,verifyAdmin, async (req, res) => {
+      const { id } = req.params;
+
+      const result = await lessonReportsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    });
+
+app.get('/lessons/user/:email', async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    const lessons = await lessonsCollection
+      .find({ email: email })
+      .toArray();
+
+    res.send(lessons);
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({ error: "Server error" });
+  }
+});
+
     // lessons related apis
-    app.get("/lessons", async (req, res) => {
+    app.get("/lessons",verifyFBToken,verifyAdmin, async (req, res) => {
       try {
         const query = {};
         const { email } = req.query;
-
+        
         // /parcels?email=''&
         if (email) {
           query.email = email;
@@ -124,13 +293,15 @@ app.get('/profile/user/:email', async (req, res) => {
 
         const options = { sort: { createdAt: -1 } };
 
-        const cursor = lessonsCollection.find(query, options);
+        const cursor = lessonsCollection.find(query, options); 
+        // console.log('headers in the middleware', req.headers.authorization);
         const result = await cursor.toArray();
         res.send(result);
       } catch (error) {
         res.status(500).send({ error: error.message });
       }
     });
+    
     // lessons related apis
     app.get("/lessons/:id", async (req, res) => {
       try {
@@ -143,6 +314,8 @@ app.get('/profile/user/:email', async (req, res) => {
         console.log(error);
       }
     });
+
+    // lesson update
     app.patch("/lessons/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -180,7 +353,8 @@ app.get('/profile/user/:email', async (req, res) => {
       }
     });
 
-    app.delete("/lessons/:id", async (req, res) => {
+    // lesson delete
+    app.delete("/lessons/:id",verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
 
@@ -220,8 +394,10 @@ app.get('/profile/user/:email', async (req, res) => {
     );
   } finally {
     // Ensures that the client will close when you finish/error
+    
   }
 }
+
 run().catch(console.dir);
 
 // Test route
