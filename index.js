@@ -171,6 +171,23 @@ app.get('/profile/user/:email', async (req, res) => {
   }
 });
 
+// admin profile name and image change api
+app.patch('/users/profile',verifyFBToken,verifyAdmin, async(req,res)=>{
+  try {
+    const {photoURL,displayName} = req.body;
+    console.log("admin profile patch",photoURL,displayName);
+    updatedDoc = {
+      
+    } 
+    const result = await userCollection.updateOne({ _id: new ObjectId(id) },{$set: {
+        displayName:displayName,
+        photoURL:photoURL
+      }})
+      res.send(result)
+  } catch (error) {
+    console.log(error);
+  }
+})
 
 // POST: Create lesson report user
 
