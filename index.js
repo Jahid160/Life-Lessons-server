@@ -20,6 +20,7 @@ app.use(express.json());
 
 const verifyFBToken = async (req, res, next) => {
   const token = req.headers.authorization;
+   console.log(token);
 
   if (!token) {
     return res.status(401).send({ message: "unauthorized access" });
@@ -30,6 +31,7 @@ const verifyFBToken = async (req, res, next) => {
     const decoded = await admin.auth().verifyIdToken(idToken);
     console.log("decoded in the token", decoded);
     req.decoded_email = decoded.email;
+    console.log("decoded email",req.decoded_email);
     next();
   } catch (err) {
     return res.status(401).send({ message: "unauthorized access" });
@@ -68,7 +70,18 @@ async function run() {
       next();
     };
 
-    // users related apis
+    // verify isPremium
+    // const verifyPremium = async (req, res, next) => {
+    //   const user = await userCollection.findOne({ email: req.decoded.email });
+
+    //   if (!user?.isPremium) {
+    //     return res.status(403).send({ message: "Premium only" });
+    //   }
+
+    //   next();
+    // };
+
+    // dashboard user api
     app.get("/users", verifyFBToken, async (req, res) => {
       const searchText = req.query.searchText;
       const query = {};
@@ -112,12 +125,28 @@ async function run() {
       try {
         const email = req.params.email;
         const query = { email };
+        console.log(email);
         const user = await userCollection.findOne(query);
         res.send(user);
       } catch (error) {
         console.log(error);
       }
     });
+
+    // isPremium user
+// app.get("/users/isPremium", verifyFBToken, async (req, res) => {
+
+//  try {
+// const email = req.decoded_email;
+// console.log(email);
+  
+//   const user = await userCollection.findOne({email});
+//         res.send(user);
+//       } catch (error) {
+//       console.log(error);
+// } 
+// });
+
 
     app.get("/users/:email/role", async (req, res) => {
       try {
@@ -134,7 +163,7 @@ async function run() {
       const user = req.body;
       user.createdAt = new Date();
       user.role = "user";
-      user.isPremium = "false";
+      user.isPremium = false;
       const email = user.email;
       const userExists = await userCollection.findOne({ email });
 
@@ -375,7 +404,7 @@ async function run() {
     });
 
     // lessons related apis
-    app.get("/lessons", verifyFBToken, async (req, res) => {
+    app.get("/lessons",  async (req, res) => {
       try {
         const query = {};
         const { email } = req.query;
